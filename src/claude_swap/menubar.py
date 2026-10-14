@@ -31,7 +31,7 @@ from pathlib import Path
 from claude_swap import pace
 from claude_swap.exceptions import ClaudeSwitchError, CredentialReadError
 from claude_swap.printer import warning
-from claude_swap.switcher import SENTINEL_NOTES
+from claude_swap.switcher import SENTINEL_NOTES, sentinel_note
 
 ICON = "⇄"
 REFRESH_CHOICES: tuple[int, ...] = (30, 60, 300)
@@ -396,7 +396,7 @@ def _account_display_usage(entry) -> dict | str | None:
     ``None``.
     """
     if entry.sentinel:
-        return SENTINEL_NOTES.get(entry.sentinel, entry.sentinel)
+        return sentinel_note(entry)
     return entry.last_good
 
 

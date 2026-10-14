@@ -192,7 +192,7 @@ def account_card_text(
         text.append("\n    ")
         style = palette.muted if sentinel == USAGE_API_KEY else palette.sev_warn
         marker = "·" if sentinel == USAGE_API_KEY else "⚠"
-        text.append(f"{marker} {data.sentinel_label(sentinel)}", style=style)
+        text.append(f"{marker} {data.sentinel_label(sentinel, acc.usage)}", style=style)
         # Same supplementary line `cswap list` prints: the last good
         # measurement behind the sentinel (API-key accounts have no quota to
         # have "seen").
@@ -265,7 +265,7 @@ def mini_account_text(
     sentinel = acc.usage.sentinel
     if sentinel is not None:
         style = palette.muted if sentinel == USAGE_API_KEY else palette.sev_warn
-        text.append(data.sentinel_label(sentinel), style=style)
+        text.append(data.sentinel_label(sentinel, acc.usage), style=style)
         return text
 
     last_good = acc.usage.last_good

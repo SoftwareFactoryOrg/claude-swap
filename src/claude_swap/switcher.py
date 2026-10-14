@@ -205,6 +205,28 @@ SENTINEL_NOTES = {
 }
 
 
+def sentinel_note(entry: UsageEntry, now: float | None = None) -> str:
+    """The note for ``entry``'s sentinel state.
+
+    An expired token whose fetch is gated by failure backoff is not "refresh
+    deferred this pass": the endpoint is refusing the account and no refresh
+    will be tried until the backoff lapses, however long that is (Claude Code
+    refreshes the live token on its own next use meanwhile). Say that instead.
+    """
+    sentinel = entry.sentinel
+    if sentinel == USAGE_TOKEN_EXPIRED:
+        now = time.time() if now is None else now
+        if entry.in_backoff(now) and entry.backoff_until is not None:
+            wait = max(0.0, entry.backoff_until - now)
+            mins = max(1, round(wait / 60))
+            wait_s = f"{mins}m" if mins < 90 else f"{mins // 60}h {mins % 60}m"
+            return (
+                f"token expired — usage fetch backing off after "
+                f"{entry.last_error or 'errors'}; next try in {wait_s}"
+            )
+    return SENTINEL_NOTES.get(sentinel, sentinel) if sentinel else ""
+
+
 def last_seen_note(entry: UsageEntry) -> str | None:
     """"last seen 53% used · 12m ago" from an entry's last-good measurement.
 
@@ -232,7 +254,7 @@ def _usage_entry_lines(entry: UsageEntry) -> list[str]:
     error, so a failing endpoint is visible instead of a silent blank.
     """
     if entry.sentinel is not None:
-        out = [dimmed(SENTINEL_NOTES.get(entry.sentinel, entry.sentinel))]
+        out = [dimmed(sentinel_note(entry))]
         last_seen = last_seen_note(entry)
         if last_seen is not None and entry.sentinel != USAGE_API_KEY:
             out.append(f"{dimmed('└')} {muted(last_seen)}")

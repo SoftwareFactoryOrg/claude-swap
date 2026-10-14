@@ -310,7 +310,7 @@ class AutoScreen(Screen):
             entry.append(acc.email, style=palette.foreground)
             if acc.usage.sentinel is not None:
                 entry.append(
-                    f"  {data.sentinel_label(acc.usage.sentinel)}", style=palette.muted
+                    f"  {data.sentinel_label(acc.usage.sentinel, acc.usage)}", style=palette.muted
                 )
                 ranked.append((998.0, acc.number))
             elif pct is None:
