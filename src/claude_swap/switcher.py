@@ -5051,7 +5051,11 @@ class ClaudeAccountSwitcher:
         requested = [
             num
             for num in info_by_num
-            if num not in sentinels and (fetch is None or num in fetch)
+            if num not in sentinels
+            and (fetch is None or num in fetch)
+            # Parked: a persistently failing inactive slot is never retried
+            # (it polls again once it is the active account).
+            and (info_by_num[num][4] or not entries[num].parked)
         ]
         if fetch is None:
             # Repair reset-parked plans written by releases that stopped

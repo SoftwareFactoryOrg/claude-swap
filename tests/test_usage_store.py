@@ -306,7 +306,7 @@ class TestRateLimitTrustBounds:
 
 class TestBackoff:
     def test_exponential_backoff(self, store, clock):
-        expected = [30.0, 60.0, 120.0, 240.0, 480.0, 1800.0, 1800.0]
+        expected = [30.0, 60.0, 120.0, 240.0, 480.0, 600.0, 600.0]
         for i, want in enumerate(expected):
             store.record({"1": FetchRecord(error="http-500")}, IDENT)
             entry = store.entries(IDENT)["1"]
@@ -346,22 +346,7 @@ class TestBackoff:
         store.record({"1": FetchRecord(error="refresh-failed")}, IDENT)
         entry = store.entries(IDENT)["1"]
         assert entry.consecutive_failures == 1025
-        assert entry.backoff_until == pytest.approx(
-            clock.now + usage_store.PERSISTENT_FAILURE_BACKOFF_S
-        )
-
-    def test_persistent_failure_retries_every_30_minutes(self, store, clock):
-        # A 403 that never recovers must not keep spending the shared hourly
-        # request budget every 10 minutes.
-        for n in range(1, 6):
-            store.record({"1": FetchRecord(error="http-403")}, IDENT)
-            entry = store.entries(IDENT)["1"]
-            assert entry.consecutive_failures == n
-            assert entry.backoff_until - clock.now <= BACKOFF_CAP_S
-        store.record({"1": FetchRecord(error="http-403")}, IDENT)
-        entry = store.entries(IDENT)["1"]
-        assert entry.consecutive_failures == 6
-        assert entry.backoff_until == pytest.approx(clock.now + 1800.0)
+        assert entry.backoff_until == pytest.approx(clock.now + BACKOFF_CAP_S)
 
     def test_retry_after_is_the_floor(self, store, clock):
         store.record(
@@ -383,8 +368,8 @@ class TestBackoff:
         # "Retry-After: 0" is the saturated-window edge: the token's rolling
         # hour is full and frees only as old requests age out, so even the
         # first backoff waits EDGE_BACKOFF_S; the exponential curve may push
-        # past it, capped at BACKOFF_CAP_S until the persistent-failure floor.
-        expected = [300.0, 300.0, 300.0, 300.0, 480.0, 1800.0, 1800.0]
+        # past it, capped at BACKOFF_CAP_S.
+        expected = [300.0, 300.0, 300.0, 300.0, 480.0, 600.0, 600.0]
         for i, want in enumerate(expected):
             store.record(
                 {"1": FetchRecord(error="http-429", retry_after_s=0.0)}, IDENT
@@ -1177,6 +1162,14 @@ class TestDueCandidate:
     def test_missing_entry_is_most_due(self):
         entries = {"3": UsageEntry(fetched_at=self.NOW - 60, age_s=60.0)}
         assert due_candidate(["2", "3"], entries, self.NOW) == "2"
+
+    def test_parked_alternate_is_never_picked(self):
+        entries = {
+            "2": UsageEntry(consecutive_failures=6),
+            "3": UsageEntry(fetched_at=self.NOW - 999, age_s=999.0),
+        }
+        assert due_candidate(["2", "3"], entries, self.NOW) == "3"
+        assert due_candidate(["2"], entries, self.NOW) is None
 
     def test_never_fetched_beats_fetched(self):
         entries = {

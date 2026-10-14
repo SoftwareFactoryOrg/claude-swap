@@ -4352,6 +4352,50 @@ class TestGetCurrentAccountOrgSupport:
 
 # ── Task 5: add_account with org fields ──────────────────────────────────────
 
+class TestParkedSlots:
+    """A persistently failing inactive slot is never fetched; the active one is."""
+
+    def _park(self, switcher, num, email, failures=6):
+        from claude_swap.usage_store import FetchRecord
+        for _ in range(failures):
+            switcher._usage_store.record(
+                {num: FetchRecord(error="http-403")}, {num: (email, "")}
+            )
+        # Expire any backoff so only parking can keep the slot out.
+        table = json.loads(switcher._usage_store.path.read_text())
+        table["accounts"][num]["backoffUntil"] = None
+        switcher._usage_store.path.write_text(json.dumps(table))
+
+    def _creds(self):
+        return json.dumps({"claudeAiOauth": {
+            "accessToken": "at", "refreshToken": "rt",
+            "expiresAt": (time.time() + 86400) * 1000,
+        }})
+
+    def test_inactive_parked_slot_is_not_fetched(self, temp_home):
+        switcher = ClaudeAccountSwitcher()
+        switcher._setup_directories()
+        self._park(switcher, "2", "test@example.com")
+        info = [(2, "test@example.com", "Org", "", False, self._creds(), "")]
+        with patch.object(switcher, "_run_usage_fetches") as run:
+            entries = switcher._collect_usage_entries(info)
+        run.assert_not_called()
+        assert entries["2"].parked
+
+    def test_active_parked_slot_is_still_fetched(self, temp_home):
+        from claude_swap.usage_store import FetchRecord
+        switcher = ClaudeAccountSwitcher()
+        switcher._setup_directories()
+        self._park(switcher, "2", "test@example.com")
+        info = [(2, "test@example.com", "Org", "", True, self._creds(), "")]
+        with patch.object(
+            switcher, "_run_usage_fetches",
+            return_value={"2": FetchRecord(error="http-403")},
+        ) as run:
+            switcher._collect_usage_entries(info)
+        run.assert_called_once()
+
+
 class TestDeadTokenQuarantine:
     """A dead refresh-token account is surfaced as re-login-needed and not fetched."""
 
