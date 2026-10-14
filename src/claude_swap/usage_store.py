@@ -111,6 +111,14 @@ RATE_LIMIT_TRUST_MAX_AGE_S = 7200.0
 # Failure backoff when the server sent no Retry-After: 30s · 2^(n-1), capped.
 BACKOFF_BASE_S = 30.0
 BACKOFF_CAP_S = 600.0
+# A slot still failing once the curve has saturated (failures >= 6) is not a
+# burst: every further attempt spends the endpoint's shared hourly budget and
+# a persistent 403 never recovers by retrying (measured: one slot, 56 straight
+# failures at the 600s cap, a 429 lockout about every fifth poll). Such a slot
+# is retried every 30 minutes instead. Applied in ``record()`` as a floor so
+# the Retry-After arithmetic in ``_failure_backoff_s`` is untouched.
+PERSISTENT_FAILURE_BACKOFF_S = 1800.0
+PERSISTENT_FAILURE_THRESHOLD = 6
 # Exponent clamp: a permanently failing account increments its failure count
 # forever, and 2**n stops converting to float at n >= 1024 (OverflowError).
 # The curve already saturates at BACKOFF_CAP_S by shift 5, so any cap above
@@ -1129,11 +1137,14 @@ class UsageStore:
                     # Kept across later successes: the poll planner floors the
                     # cadence while a 429 is recent (see UsageEntry.last_429_at).
                     row["last429At"] = now
-                row["backoffUntil"] = now + _failure_backoff_s(
+                wait = _failure_backoff_s(
                     failures,
                     rec.retry_after_s,
                     rate_limited=rec.error == "http-429",
                 )
+                if failures >= PERSISTENT_FAILURE_THRESHOLD:
+                    wait = max(wait, PERSISTENT_FAILURE_BACKOFF_S)
+                row["backoffUntil"] = now + wait
                 # Only a permanent-auth failure advances the dead-token count; a
                 # transient error (429/timeout) leaves it as-is — it is no
                 # evidence either way and must not reset a real dead-token tally.
