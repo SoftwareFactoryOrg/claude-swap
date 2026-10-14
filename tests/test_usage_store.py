@@ -1163,6 +1163,14 @@ class TestDueCandidate:
         entries = {"3": UsageEntry(fetched_at=self.NOW - 60, age_s=60.0)}
         assert due_candidate(["2", "3"], entries, self.NOW) == "2"
 
+    def test_parked_alternate_is_never_picked(self):
+        entries = {
+            "2": UsageEntry(consecutive_failures=6),
+            "3": UsageEntry(fetched_at=self.NOW - 999, age_s=999.0),
+        }
+        assert due_candidate(["2", "3"], entries, self.NOW) == "3"
+        assert due_candidate(["2"], entries, self.NOW) is None
+
     def test_never_fetched_beats_fetched(self):
         entries = {
             "2": UsageEntry(fetched_at=self.NOW - 999, age_s=999.0),

@@ -23,7 +23,8 @@ from typing import Callable
 from claude_swap import oauth, printer, usage_store
 from claude_swap.exceptions import ClaudeSwitchError
 from claude_swap.snapshot_source import SnapshotSource
-from claude_swap.switcher import SENTINEL_NOTES, last_seen_note
+from claude_swap.switcher import SENTINEL_NOTES, last_seen_note, sentinel_note
+from claude_swap.usage_store import UsageEntry
 
 
 # ---------------------------------------------------------------------------
@@ -87,8 +88,10 @@ def run_action(fn: Callable[[], dict | None]) -> ActionResult:
 # Display helpers
 # ---------------------------------------------------------------------------
 
-def sentinel_label(sentinel: str) -> str:
+def sentinel_label(sentinel: str, entry: UsageEntry | None = None) -> str:
     """The same wording ``cswap list`` prints for this sentinel state."""
+    if entry is not None and entry.sentinel == sentinel:
+        return sentinel_note(entry)
     return SENTINEL_NOTES.get(sentinel, sentinel)
 
 

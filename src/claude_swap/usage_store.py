@@ -111,6 +111,13 @@ RATE_LIMIT_TRUST_MAX_AGE_S = 7200.0
 # Failure backoff when the server sent no Retry-After: 30s · 2^(n-1), capped.
 BACKOFF_BASE_S = 30.0
 BACKOFF_CAP_S = 600.0
+# A slot that is NOT the active account and has failed this many times in a
+# row is parked: never fetched again until it becomes active (a success then
+# clears the count). Retrying it only spends the endpoint's shared request
+# budget (measured: 24 of 29 slots failing 6+ times, one at 301 straight 403s)
+# and provokes 429 lockouts for the slot that matters. Its last reading and
+# reset countdowns keep being served.
+PARK_FAILURE_THRESHOLD = 6
 # Exponent clamp: a permanently failing account increments its failure count
 # forever, and 2**n stops converting to float at n >= 1024 (OverflowError).
 # The curve already saturates at BACKOFF_CAP_S by shift 5, so any cap above
@@ -318,6 +325,11 @@ class UsageEntry:
     def fresh(self, now: float, ttl: float = SERVE_TTL_S) -> bool:
         return self.fetched_at is not None and (now - self.fetched_at) <= ttl
 
+    @property
+    def parked(self) -> bool:
+        """Failing persistently: an inactive slot in this state is not polled."""
+        return self.consecutive_failures >= PARK_FAILURE_THRESHOLD
+
     def in_backoff(self, now: float) -> bool:
         return self.backoff_until is not None and now < self.backoff_until
 
@@ -462,6 +474,8 @@ def due_candidate(
             continue
         if entry.token_dead():
             continue  # dead refresh-token: quarantined, needs a re-login
+        if entry.parked:
+            continue  # persistently failing alternate: see PARK_FAILURE_THRESHOLD
         if entry.in_backoff(now):
             continue
         if entry.held(now):

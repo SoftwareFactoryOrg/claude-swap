@@ -312,6 +312,29 @@ class TestFormatting:
             assert tui_data.sentinel_label(sentinel) == note
         assert tui_data.sentinel_label("unknown state") == "unknown state"
 
+    def test_expired_token_in_backoff_names_the_real_cause(self):
+        # An expired token gated by failure backoff is not "deferred this
+        # pass": the endpoint is refusing the account for a long wait.
+        from claude_swap.switcher import sentinel_note
+
+        now = time.time()
+        entry = UsageEntry(
+            sentinel=USAGE_TOKEN_EXPIRED,
+            last_error="http-429",
+            consecutive_failures=3,
+            backoff_until=now + 3000,
+        )
+        note = sentinel_note(entry, now)
+        assert "backing off after http-429" in note
+        assert "next try in 50m" in note
+        assert tui_data.sentinel_label(USAGE_TOKEN_EXPIRED, entry).startswith(
+            "token expired — usage fetch backing off"
+        )
+        # Backoff lapsed: the original wording applies again.
+        assert sentinel_note(entry, now + 4000) == (
+            "token expired — refresh deferred this pass; retries automatically"
+        )
+
     def test_sentinel_card_shows_last_seen_like_cswap_list(self):
         # A sentinel is a live overlay — the entry can still carry the last
         # good measurement, and `cswap list` prints it as a "last seen" line.
