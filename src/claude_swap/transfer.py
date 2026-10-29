@@ -1,8 +1,9 @@
 """Export and import account data for claude-swap.
 
 Moves the OAuth credentials and config across machines via a portable
-JSON envelope. No encryption is built in — users compose their own
-(e.g. `cswap --export - | gpg -c > out.gpg`).
+JSON envelope. Plain by default; ``encrypt=True`` wraps it in a
+passphrase-encrypted envelope (see envelope.py), and
+CSWAP_REQUIRE_ENCRYPTED_EXPORT=1 refuses plaintext export.
 """
 
 from __future__ import annotations
@@ -16,6 +17,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from claude_swap import __version__
+from claude_swap import envelope as envelope_mod
 from claude_swap.credentials import looks_like_api_key
 from claude_swap.exceptions import (
     ConfigError,
@@ -169,6 +171,8 @@ def export_accounts(
     destination: str,
     account: str | None = None,
     full: bool = False,
+    encrypt: bool = False,
+    passphrase_file: str | None = None,
 ) -> None:
     """Export accounts to a JSON file or stdout.
 
@@ -185,6 +189,12 @@ def export_accounts(
         TransferError: malformed/missing data, unknown account.
         CredentialReadError: failed to read credentials.
     """
+    if not encrypt and envelope_mod.require_encrypted():
+        raise TransferError(
+            f"plaintext export refused: {envelope_mod.REQUIRE_ENCRYPTED_ENV} is set; "
+            "use --encrypt"
+        )
+    passphrase = envelope_mod.resolve_passphrase(passphrase_file) if encrypt else ""
     sequence_data = switcher._get_sequence_data_migrated()
     if not sequence_data or not sequence_data.get("accounts"):
         raise TransferError("no accounts to export — run cswap --add-account first")
@@ -303,6 +313,8 @@ def export_accounts(
         "accounts": accounts_payload,
     }
 
+    if encrypt:
+        envelope = envelope_mod.encrypt_envelope(envelope, passphrase)
     serialized = json.dumps(envelope, indent=2)
 
     if destination == "-":
@@ -320,6 +332,7 @@ def import_accounts(
     switcher: ClaudeAccountSwitcher,
     source: str,
     force: bool = False,
+    passphrase_file: str | None = None,
 ) -> None:
     """Import accounts from a JSON file or stdin.
 
@@ -357,10 +370,11 @@ def import_accounts(
         )
 
     if envelope.get("encrypted") is True:
-        raise TransferError(
-            "encrypted exports are not supported in this version — "
-            "decrypt before piping (e.g. gpg -d backup.gpg | cswap --import -)"
+        envelope = envelope_mod.decrypt_envelope(
+            envelope, envelope_mod.resolve_passphrase(passphrase_file)
         )
+        if envelope.get("version") != FORMAT_VERSION or envelope.get("encrypted"):
+            raise TransferError("decrypted envelope has an unsupported shape")
 
     accounts = envelope.get("accounts")
     if not isinstance(accounts, list) or not accounts:

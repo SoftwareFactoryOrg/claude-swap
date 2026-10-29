@@ -401,3 +401,10 @@ pipx uninstall claude-swap
 ## License
 
 MIT
+
+## Encrypted export
+
+`cswap export <path> --encrypt --passphrase-file <0600 file>` (or `CSWAP_ENVELOPE_PASSPHRASE`) writes a
+scrypt + AES-256-GCM envelope; `cswap import` decrypts it automatically with the same passphrase source.
+Needs `pip install 'claude-swap[envelope]'`. Set `CSWAP_REQUIRE_ENCRYPTED_EXPORT=1` on unattended hosts to
+refuse plaintext exports. Passphrases are never accepted on the command line.
