@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib.util
 import io
 import json
 import os
@@ -2219,9 +2220,11 @@ class TestImportUsage:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.skipif(
+    __import__("importlib").util.find_spec("cryptography") is None,
+    reason="cryptography not installed",
+)
 class TestEncryptedEnvelope:
-    pytest.importorskip("cryptography")
-
     def _export(self, home: Path, **kw) -> Path:
         src = _linux_switcher(home)
         _seed_account(src, 1, "alice@example.com", "org-a", "Org A")
@@ -2287,3 +2290,11 @@ class TestEncryptedEnvelope:
         short = _pp(temp_home, "short")
         with pytest.raises(TransferError, match="at least"):
             export_accounts(src, str(temp_home / "o"), encrypt=True, passphrase_file=str(short))
+
+    def test_tampered_header_rejected(self, temp_home: Path):
+        out = self._export(temp_home)
+        w = json.loads(out.read_text())
+        w["exportedAt"] = "2000-01-01T00:00:00Z"
+        out.write_text(json.dumps(w))
+        with pytest.raises(TransferError, match="cannot decrypt"):
+            import_accounts(_linux_switcher(temp_home), str(out), passphrase_file=str(_pp(temp_home)))

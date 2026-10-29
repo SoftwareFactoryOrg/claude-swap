@@ -17,7 +17,7 @@ from claude_swap.exceptions import TransferError
 
 PASSPHRASE_ENV = "CSWAP_ENVELOPE_PASSPHRASE"
 REQUIRE_ENCRYPTED_ENV = "CSWAP_REQUIRE_ENCRYPTED_EXPORT"
-_AAD = b"claude-swap-envelope-v1"
+_AAD_PREFIX = b"claude-swap-envelope-v1"
 _SCRYPT = {"n": 2**15, "r": 8, "p": 1}
 _MIN_PASSPHRASE = 12
 
@@ -69,6 +69,12 @@ def _b64(data: bytes) -> str:
     return base64.b64encode(data).decode("ascii")
 
 
+def _aad(wrapper: dict) -> bytes:
+    """Bind the cleartext header fields to the ciphertext."""
+    header = {k: wrapper.get(k) for k in ("version", "encrypted", "exportedAt", "cipher", "kdf", "nonce")}
+    return _AAD_PREFIX + json.dumps(header, sort_keys=True).encode("utf-8")
+
+
 def encrypt_envelope(envelope: dict, passphrase: str) -> dict:
     if len(passphrase) < _MIN_PASSPHRASE:
         raise TransferError(f"passphrase must be at least {_MIN_PASSPHRASE} characters")
@@ -76,15 +82,16 @@ def encrypt_envelope(envelope: dict, passphrase: str) -> dict:
     salt, nonce = os.urandom(16), os.urandom(12)
     key = _derive(passphrase, salt, **_SCRYPT)
     plaintext = json.dumps(envelope).encode("utf-8")
-    return {
+    wrapper = {
         "version": envelope["version"],
         "encrypted": True,
         "exportedAt": envelope.get("exportedAt"),
         "cipher": "aes-256-gcm",
         "kdf": {"name": "scrypt", **_SCRYPT, "salt": _b64(salt)},
         "nonce": _b64(nonce),
-        "ciphertext": _b64(aesgcm(key).encrypt(nonce, plaintext, _AAD)),
     }
+    wrapper["ciphertext"] = _b64(aesgcm(key).encrypt(nonce, plaintext, _aad(wrapper)))
+    return wrapper
 
 
 def decrypt_envelope(wrapper: dict, passphrase: str) -> dict:
@@ -100,7 +107,7 @@ def decrypt_envelope(wrapper: dict, passphrase: str) -> dict:
         plaintext = aesgcm(key).decrypt(
             base64.b64decode(wrapper["nonce"]),
             base64.b64decode(wrapper["ciphertext"]),
-            _AAD,
+            _aad(wrapper),
         )
         inner = json.loads(plaintext)
     except TransferError:
