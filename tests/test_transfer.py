@@ -2272,13 +2272,13 @@ class TestEncryptedEnvelope:
         with pytest.raises(TransferError, match="out of range"):
             import_accounts(_linux_switcher(temp_home), str(out), passphrase_file=str(_pp(temp_home)))
 
-    def test_policy_refuses_plaintext_export(self, temp_home: Path):
+    def test_policy_refuses_plaintext_export(self, temp_home: Path, capsys):
         src = _linux_switcher(temp_home)
         _seed_account(src, 1, "alice@example.com")
         with patch.dict(os.environ, {"CSWAP_REQUIRE_ENCRYPTED_EXPORT": "1"}):
             with pytest.raises(TransferError, match="plaintext export refused"):
                 export_accounts(src, "-")
-            assert not (temp_home / "x").exists()
+        assert capsys.readouterr().out == ""
 
     def test_passphrase_file_must_be_private_and_long(self, temp_home: Path):
         src = _linux_switcher(temp_home)

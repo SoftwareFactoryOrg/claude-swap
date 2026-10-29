@@ -1380,8 +1380,8 @@ The original flag spellings (%(prog)s --switch, %(prog)s --list, ...) keep worki
     if args.encrypt and not args.export:
         parser.error("--encrypt can only be used with 'export'")
 
-    if args.passphrase_file and not (args.export or args.import_):
-        parser.error("--passphrase-file can only be used with 'export' or 'import'")
+    if args.passphrase_file and not (args.import_ or (args.export and args.encrypt)):
+        parser.error("--passphrase-file requires 'export --encrypt' or 'import'")
 
     if args.hold is not None and args.import_usage is None:
         parser.error("--hold can only be used with 'import-usage'")

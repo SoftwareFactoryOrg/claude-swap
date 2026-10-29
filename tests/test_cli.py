@@ -1817,3 +1817,19 @@ class TestImportUsageCli:
                 cli.main()
         assert exc.value.code == 2
         assert message in capsys.readouterr().err
+
+
+class TestEnvelopeFlagValidation:
+    @pytest.mark.parametrize("argv,message", [
+        (["cswap", "list", "--encrypt"], "--encrypt can only be used with 'export'"),
+        (["cswap", "export", "/tmp/x", "--passphrase-file", "/tmp/p"],
+         "--passphrase-file requires 'export --encrypt' or 'import'"),
+        (["cswap", "list", "--passphrase-file", "/tmp/p"],
+         "--passphrase-file requires 'export --encrypt' or 'import'"),
+    ])
+    def test_invalid_combinations(self, argv, message, capsys):
+        with patch.object(sys, "argv", argv):
+            with pytest.raises(SystemExit) as exc:
+                cli.main()
+        assert exc.value.code == 2
+        assert message in capsys.readouterr().err

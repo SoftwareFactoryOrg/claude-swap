@@ -20,6 +20,7 @@ REQUIRE_ENCRYPTED_ENV = "CSWAP_REQUIRE_ENCRYPTED_EXPORT"
 _AAD_PREFIX = b"claude-swap-envelope-v1"
 _SCRYPT = {"n": 2**15, "r": 8, "p": 1}
 _MIN_PASSPHRASE = 12
+_MAXMEM = 256 * 1024 * 1024
 
 
 def require_encrypted() -> bool:
@@ -61,7 +62,7 @@ def _aesgcm():
 def _derive(passphrase: str, salt: bytes, n: int, r: int, p: int) -> bytes:
     return hashlib.scrypt(
         passphrase.encode("utf-8"), salt=salt, n=n, r=r, p=p,
-        maxmem=256 * 1024 * 1024, dklen=32,
+        maxmem=_MAXMEM, dklen=32,
     )
 
 
@@ -101,7 +102,7 @@ def decrypt_envelope(wrapper: dict, passphrase: str) -> dict:
         if wrapper.get("cipher") != "aes-256-gcm" or kdf.get("name") != "scrypt":
             raise TransferError("unsupported encrypted envelope cipher/kdf")
         n, r, p = int(kdf["n"]), int(kdf["r"]), int(kdf["p"])
-        if n > 2**20 or r > 16 or p > 4:  # bound attacker-chosen KDF cost
+        if n > 2**20 or r > 16 or p > 4 or 128 * r * (n + p + 2) > _MAXMEM:  # bound attacker-chosen KDF cost
             raise TransferError("encrypted envelope KDF parameters out of range")
         key = _derive(passphrase, base64.b64decode(kdf["salt"]), n, r, p)
         plaintext = aesgcm(key).decrypt(
