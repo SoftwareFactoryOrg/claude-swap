@@ -365,7 +365,8 @@ class TestCLI:
              patch("claude_swap.update_check.check_for_update", return_value=None):
             cli.main()
         export_fn.assert_called_once_with(
-            switcher_cls.return_value, "/tmp/x", account="2", full=False
+            switcher_cls.return_value, "/tmp/x", account="2", full=False,
+            encrypt=False, passphrase_file=None,
         )
 
     def test_full_flag_requires_export(self, capsys):
@@ -387,7 +388,8 @@ class TestCLI:
              patch("claude_swap.update_check.check_for_update", return_value=None):
             cli.main()
         export_fn.assert_called_once_with(
-            switcher_cls.return_value, "/tmp/x", account=None, full=True
+            switcher_cls.return_value, "/tmp/x", account=None, full=True,
+            encrypt=False, passphrase_file=None,
         )
 
     def test_import_dispatch_calls_transfer(self):
@@ -401,7 +403,8 @@ class TestCLI:
              patch("claude_swap.update_check.check_for_update", return_value=None):
             cli.main()
         import_fn.assert_called_once_with(
-            switcher_cls.return_value, "/tmp/x", force=True
+            switcher_cls.return_value, "/tmp/x", force=True,
+            passphrase_file=None,
         )
 
     def test_upgrade_in_help(self):
@@ -1809,6 +1812,22 @@ class TestImportUsageCli:
         (["cswap", "import-usage", "-", "--hold", "inf"], "--hold must be a non-negative"),
     ])
     def test_hold_is_validated(self, argv, message, capsys):
+        with patch.object(sys, "argv", argv):
+            with pytest.raises(SystemExit) as exc:
+                cli.main()
+        assert exc.value.code == 2
+        assert message in capsys.readouterr().err
+
+
+class TestEnvelopeFlagValidation:
+    @pytest.mark.parametrize("argv,message", [
+        (["cswap", "list", "--encrypt"], "--encrypt can only be used with 'export'"),
+        (["cswap", "export", "/tmp/x", "--passphrase-file", "/tmp/p"],
+         "--passphrase-file requires 'export --encrypt' or 'import'"),
+        (["cswap", "list", "--passphrase-file", "/tmp/p"],
+         "--passphrase-file requires 'export --encrypt' or 'import'"),
+    ])
+    def test_invalid_combinations(self, argv, message, capsys):
         with patch.object(sys, "argv", argv):
             with pytest.raises(SystemExit) as exc:
                 cli.main()

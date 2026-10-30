@@ -1173,6 +1173,17 @@ The original flag spellings (%(prog)s --switch, %(prog)s --list, ...) keep worki
         help="Include full ~/.claude.json in export (default: oauthAccount only)",
     )
     parser.add_argument(
+        "--encrypt",
+        action="store_true",
+        help="With 'export': encrypt the envelope (passphrase from "
+        "--passphrase-file or $CSWAP_ENVELOPE_PASSPHRASE)",
+    )
+    parser.add_argument(
+        "--passphrase-file",
+        metavar="PATH",
+        help="With 'export --encrypt' or 'import': file holding the passphrase (mode 0600)",
+    )
+    parser.add_argument(
         "--hold",
         type=float,
         metavar="SECONDS",
@@ -1366,6 +1377,12 @@ The original flag spellings (%(prog)s --switch, %(prog)s --list, ...) keep worki
     if args.full and not args.export:
         parser.error("--full can only be used with 'export'")
 
+    if args.encrypt and not args.export:
+        parser.error("--encrypt can only be used with 'export'")
+
+    if args.passphrase_file and not (args.import_ or (args.export and args.encrypt)):
+        parser.error("--passphrase-file requires 'export --encrypt' or 'import'")
+
     if args.hold is not None and args.import_usage is None:
         parser.error("--hold can only be used with 'import-usage'")
 
@@ -1459,11 +1476,17 @@ The original flag spellings (%(prog)s --switch, %(prog)s --list, ...) keep worki
         elif args.export:
             from claude_swap.transfer import export_accounts
 
-            export_accounts(switcher, args.export, account=args.account, full=args.full)
+            export_accounts(
+                switcher, args.export, account=args.account, full=args.full,
+                encrypt=args.encrypt, passphrase_file=args.passphrase_file,
+            )
         elif args.import_:
             from claude_swap.transfer import import_accounts
 
-            import_accounts(switcher, args.import_, force=args.force)
+            import_accounts(
+                switcher, args.import_, force=args.force,
+                passphrase_file=args.passphrase_file,
+            )
         elif args.import_usage:
             from claude_swap.transfer import import_usage
 

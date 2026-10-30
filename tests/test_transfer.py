@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib.util
 import io
 import json
 import os
@@ -89,6 +90,13 @@ def _seed_account(
     if data["activeAccountNumber"] is None:
         data["activeAccountNumber"] = num
     switcher._write_json(switcher.sequence_file, data)
+
+
+def _pp(home: Path, text: str = "correct horse battery") -> Path:
+    p = home / "pp.txt"
+    p.write_text(text)
+    p.chmod(0o600)
+    return p
 
 
 # ---------------------------------------------------------------------------
@@ -572,15 +580,15 @@ class TestValidation:
         with pytest.raises(TransferError, match="unsupported export version"):
             import_accounts(s, str(f))
 
-    def test_encrypted_flag_rejected(self, temp_home: Path):
+    def test_encrypted_flag_without_ciphertext_rejected(self, temp_home: Path):
         s = _linux_switcher(temp_home)
         env = self._make_envelope()
         env["encrypted"] = True
         f = temp_home / "e.cswap"
         f.write_text(json.dumps(env))
 
-        with pytest.raises(TransferError, match="encrypted exports are not supported"):
-            import_accounts(s, str(f))
+        with pytest.raises(TransferError):
+            import_accounts(s, str(f), passphrase_file=str(_pp(temp_home)))
 
     def test_malformed_top_level_json_rejected(self, temp_home: Path):
         s = _linux_switcher(temp_home)
@@ -2205,3 +2213,88 @@ class TestImportUsage:
                 s, temp_home, _usage_document(_usage_row("alice@example.com"), bad)
             )
         assert not s._usage_store.path.exists()
+
+
+# ---------------------------------------------------------------------------
+# Encrypted envelope (#137)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.skipif(
+    __import__("importlib").util.find_spec("cryptography") is None,
+    reason="cryptography not installed",
+)
+class TestEncryptedEnvelope:
+    def _export(self, home: Path, **kw) -> Path:
+        src = _linux_switcher(home)
+        _seed_account(src, 1, "alice@example.com", "org-a", "Org A")
+        out = home / "enc.cswap"
+        export_accounts(src, str(out), encrypt=True, passphrase_file=str(_pp(home)), **kw)
+        return out
+
+    def test_round_trip_and_canary_not_in_file(self, temp_home: Path):
+        out = self._export(temp_home)
+        raw = out.read_text()
+        assert json.loads(raw)["encrypted"] is True
+        for canary in ("rtok-1", "tok-1", "alice@example.com"):
+            assert canary not in raw
+        assert oct(out.stat().st_mode & 0o777) == "0o600"
+
+        dst_home = temp_home / "dst"
+        dst_home.mkdir()
+        with patch.dict(os.environ, {"HOME": str(dst_home)}):
+            dst = _linux_switcher(dst_home)
+            import_accounts(dst, str(out), passphrase_file=str(_pp(dst_home)))
+            assert "alice@example.com" in json.dumps(dst._get_sequence_data())
+
+    def test_wrong_passphrase_is_generic_error(self, temp_home: Path):
+        out = self._export(temp_home)
+        dst = _linux_switcher(temp_home)
+        with pytest.raises(TransferError, match="wrong passphrase or corrupted") as ei:
+            import_accounts(dst, str(out), passphrase_file=str(_pp(temp_home, "another long phrase!")))
+        assert "rtok-1" not in str(ei.value)
+
+    def test_tampered_ciphertext_rejected(self, temp_home: Path):
+        out = self._export(temp_home)
+        w = json.loads(out.read_text())
+        ct = bytearray(__import__("base64").b64decode(w["ciphertext"]))
+        ct[0] ^= 1
+        w["ciphertext"] = __import__("base64").b64encode(bytes(ct)).decode()
+        out.write_text(json.dumps(w))
+        with pytest.raises(TransferError, match="cannot decrypt"):
+            import_accounts(_linux_switcher(temp_home), str(out), passphrase_file=str(_pp(temp_home)))
+
+    def test_kdf_cost_bounded(self, temp_home: Path):
+        out = self._export(temp_home)
+        w = json.loads(out.read_text())
+        w["kdf"]["n"] = 2**30
+        out.write_text(json.dumps(w))
+        with pytest.raises(TransferError, match="out of range"):
+            import_accounts(_linux_switcher(temp_home), str(out), passphrase_file=str(_pp(temp_home)))
+
+    def test_policy_refuses_plaintext_export(self, temp_home: Path, capsys):
+        src = _linux_switcher(temp_home)
+        _seed_account(src, 1, "alice@example.com")
+        with patch.dict(os.environ, {"CSWAP_REQUIRE_ENCRYPTED_EXPORT": "1"}):
+            with pytest.raises(TransferError, match="plaintext export refused"):
+                export_accounts(src, "-")
+        assert capsys.readouterr().out == ""
+
+    def test_passphrase_file_must_be_private_and_long(self, temp_home: Path):
+        src = _linux_switcher(temp_home)
+        _seed_account(src, 1, "alice@example.com")
+        pp = _pp(temp_home)
+        pp.chmod(0o644)
+        with pytest.raises(TransferError, match="chmod 600"):
+            export_accounts(src, str(temp_home / "o"), encrypt=True, passphrase_file=str(pp))
+        short = _pp(temp_home, "short")
+        with pytest.raises(TransferError, match="at least"):
+            export_accounts(src, str(temp_home / "o"), encrypt=True, passphrase_file=str(short))
+
+    def test_tampered_header_rejected(self, temp_home: Path):
+        out = self._export(temp_home)
+        w = json.loads(out.read_text())
+        w["exportedAt"] = "2000-01-01T00:00:00Z"
+        out.write_text(json.dumps(w))
+        with pytest.raises(TransferError, match="cannot decrypt"):
+            import_accounts(_linux_switcher(temp_home), str(out), passphrase_file=str(_pp(temp_home)))
